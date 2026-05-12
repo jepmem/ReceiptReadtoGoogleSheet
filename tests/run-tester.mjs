@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bill OCR Tester
+ * Bill Receipt Analyzer Tester
  * ----------------
  * อ่านทุกไฟล์ใน Bill/ แล้วยิงเข้า /api/receipts/ocr (หรือ /analyze)
  * เก็บ raw OCR + parsed result ลง tests/results/<billName>.json
@@ -36,7 +36,7 @@ const args = Object.fromEntries(
   }),
 );
 
-const ENGINE = args.both ? 'both' : (args.engine ?? 'ocr');
+const ENGINE = args.both ? 'both' : (args.engine ?? 'analyze');
 const ONLY = args.only;
 
 if (!ACCESS_CODE) {

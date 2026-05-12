@@ -151,9 +151,10 @@ p {
 .primary-button,
 .secondary-button,
 .toggle-button,
-.back-link {
+.back-link,
+.zoom-control-button,
+.zoom-reset-button {
   appearance: none;
-  border: 0;
   text-decoration: none;
   cursor: pointer;
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
@@ -165,6 +166,7 @@ p {
   justify-content: center;
   min-height: 48px;
   padding: 0 22px;
+  border: 0;
   border-radius: 8px;
   background: var(--accent);
   color: #fff;
@@ -176,13 +178,16 @@ p {
 .primary-button:hover,
 .secondary-button:hover,
 .toggle-button:hover,
-.back-link:hover {
+.back-link:hover,
+.zoom-control-button:hover,
+.zoom-reset-button:hover {
   transform: translateY(-1px);
 }
 
 .primary-button:disabled,
 .secondary-button:disabled,
-.toggle-button:disabled {
+.toggle-button:disabled,
+.zoom-control-button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
   transform: none;
@@ -264,6 +269,7 @@ p {
 
 .toggle-button {
   min-height: 42px;
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
@@ -307,13 +313,68 @@ p {
   line-height: 1.5;
 }
 
-#cameraPreview,
-#imagePreview {
+#cameraPreview {
   width: 100%;
   aspect-ratio: 4 / 5;
-  object-fit: cover;
   border-radius: 8px;
   background: #e5ebf2;
+  object-fit: cover;
+}
+
+.image-preview-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.zoom-control-button,
+.zoom-reset-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.zoom-control-button {
+  font-size: 1.2rem;
+}
+
+.zoom-reset-button {
+  min-width: 72px;
+  color: var(--accent-deep);
+}
+
+.image-preview-frame {
+  height: clamp(560px, 72vh, 920px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #e5ebf2;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.image-preview-frame.dragging {
+  cursor: grabbing;
+}
+
+#imagePreview {
+  display: block;
+  width: calc(var(--preview-zoom, 1) * 100%);
+  min-width: 100%;
+  max-width: none;
+  height: auto;
+  margin: 0 auto;
+  background: #fff;
+  pointer-events: none;
 }
 
 .camera-actions,
@@ -540,6 +601,25 @@ p {
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
+.delete-row-button {
+  appearance: none;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(178, 59, 71, 0.26);
+  border-radius: 8px;
+  background: rgba(178, 59, 71, 0.08);
+  color: var(--danger);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.delete-row-button:hover {
+  background: rgba(178, 59, 71, 0.14);
+}
+
 .confirm-button {
   appearance: none;
   min-height: 48px;
@@ -637,6 +717,10 @@ p {
 
   .picker-box {
     min-height: 210px;
+  }
+
+  .image-preview-frame {
+    height: clamp(460px, 68vh, 760px);
   }
 
   .result-head {

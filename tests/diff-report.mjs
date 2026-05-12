@@ -7,7 +7,7 @@
  *
  * Usage:
  *   node tests/diff-report.mjs
- *   node tests/diff-report.mjs --engine=ocr     (default)
+ *   node tests/diff-report.mjs --engine=analyze (default)
  *   node tests/diff-report.mjs --json           # output JSON แทน text
  *   node tests/diff-report.mjs --only=bill1
  */
@@ -26,7 +26,7 @@ const args = Object.fromEntries(
     return [k, v ?? true];
   }),
 );
-const ENGINE = args.engine ?? 'ocr';
+const ENGINE = args.engine ?? 'analyze';
 const AS_JSON = !!args.json;
 const ONLY = args.only;
 

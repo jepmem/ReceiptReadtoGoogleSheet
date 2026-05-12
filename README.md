@@ -1,6 +1,6 @@
 # Receipt Prototype
 
-Express app for uploading or photographing receipt images, extracting receipt data with PaddleOCR, and appending the result to Google Sheets.
+Express app for uploading or photographing receipt images, extracting receipt data with Gemini, and appending the result to Google Sheets.
 
 ## Project structure
 
@@ -13,12 +13,9 @@ Express app for uploading or photographing receipt images, extracting receipt da
 
 1. Copy `.env.example` to `.env`
 2. Fill in these values:
-   - `PADDLE_OCR_PYTHON` (optional, defaults to `python`)
-   - `PADDLE_OCR_CACHE_DIR` (optional, defaults to `.paddle-cache`)
-   - `PADDLE_OCR_TIMEOUT_MS` (optional, defaults to `120000`)
    - `RECEIPT_UPLOAD_MAX_MB` (optional, defaults to `25`)
-   - `GEMINI_API_KEY` (optional legacy analyzer)
-   - `GEMINI_MODEL` (optional, defaults to `gemini-2.5-flash`)
+   - `GEMINI_API_KEY`
+   - `GEMINI_MODEL` (optional, defaults to `gemini-2.5-flash-lite`)
    - `GEMINI_MAX_RETRIES` (optional, defaults to `3`)
    - `GOOGLE_SHEETS_SPREADSHEET_ID`
    - `GOOGLE_SHEETS_WORKSHEET_NAME` (defaults to `EXPENSES`)
@@ -37,18 +34,11 @@ npm start
 
 Open `http://localhost:3000`
 
-## PaddleOCR setup
+## Gemini setup
 
-PaddleOCR runs locally on your server, so it has no per-request API quota. The machine still pays the compute cost, and the host must allow Python dependencies and model files.
+Receipt analysis uses Gemini through `@google/genai`. The default model is `gemini-2.5-flash-lite`, which is the cheapest Gemini 2.5 Flash option while still supporting image input and structured JSON output.
 
-Use Python 3.9-3.12 for the safest install path. The app calls the Python command from `PADDLE_OCR_PYTHON`.
-
-```bash
-python -m pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-python -m pip install paddleocr
-```
-
-PaddleOCR is required for receipt analysis. The upload page does not fall back to browser OCR.
+Create a Gemini API key in Google AI Studio, add it to `.env` as `GEMINI_API_KEY`, then restart the server.
 
 ## What gets extracted
 

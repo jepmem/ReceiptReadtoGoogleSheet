@@ -4,8 +4,13 @@ const filePickerPanel = document.getElementById("filePickerPanel");
 const cameraPanel = document.getElementById("cameraPanel");
 const receiptFile = document.getElementById("receiptFile");
 const previewPanel = document.getElementById("previewPanel");
+const imagePreviewFrame = document.getElementById("imagePreviewFrame");
 const imagePreview = document.getElementById("imagePreview");
 const previewName = document.getElementById("previewName");
+const zoomOutButton = document.getElementById("zoomOutButton");
+const zoomResetButton = document.getElementById("zoomResetButton");
+const zoomInButton = document.getElementById("zoomInButton");
+const zoomValue = document.getElementById("zoomValue");
 const analyzeButton = document.getElementById("analyzeButton");
 const confirmEditButton = document.getElementById("confirmEditButton");
 const submitButton = document.getElementById("submitButton");
@@ -21,10 +26,22 @@ let cameraStream = null;
 let analyzedReceipt = null;
 let draftReceipt = null;
 let isEditingReceipt = false;
+let previewZoom = 1;
+let isDraggingPreview = false;
+let previewDragStartX = 0;
+let previewDragStartY = 0;
+let previewDragStartScrollLeft = 0;
+let previewDragStartScrollTop = 0;
 let healthState = {
+  geminiConfigured: false,
+  geminiModel: "",
   googleSheetsConfigured: false,
   loaded: false,
 };
+
+const MIN_PREVIEW_ZOOM = 0.5;
+const MAX_PREVIEW_ZOOM = 3;
+const PREVIEW_ZOOM_STEP = 0.25;
 
 function createHttpError(message, status) {
   const error = new Error(message);
@@ -49,7 +66,7 @@ async function readJsonResponse(response, fallbackMessage) {
     const contentType = response.headers.get("content-type") || "";
     const isHtml = contentType.includes("text/html") || text.trim().startsWith("<");
     const message = isHtml
-      ? "The PaddleOCR API returned an HTML page instead of JSON. Restart the server, then sign in again if needed."
+      ? "The Gemini API returned an HTML page instead of JSON. Restart the server, then sign in again if needed."
       : fallbackMessage;
 
     throw createHttpError(message, response.status);
@@ -60,6 +77,12 @@ function refreshReadyState() {
   if (!healthState.loaded) {
     analyzeButton.disabled = true;
     statusText.textContent = "Checking configuration";
+    return;
+  }
+
+  if (!healthState.geminiConfigured) {
+    analyzeButton.disabled = true;
+    statusText.textContent = "Gemini API key is missing";
     return;
   }
 
@@ -83,13 +106,18 @@ async function loadHealthStatus() {
     const data = await readJsonResponse(response, "Unable to check system status.");
 
     healthState = {
+      geminiConfigured: Boolean(data.geminiConfigured),
+      geminiModel: data.geminiModel || "",
       googleSheetsConfigured: Boolean(data.googleSheetsConfigured),
       loaded: true,
     };
 
-    if (!healthState.googleSheetsConfigured) {
+    if (!healthState.geminiConfigured) {
       resultOutput.textContent =
-        "PaddleOCR is ready. Google Sheets settings are missing in .env, so results will stay on this page.";
+        "GEMINI_API_KEY is missing in .env, so receipt analysis is disabled.";
+    } else if (!healthState.googleSheetsConfigured) {
+      resultOutput.textContent =
+        "Gemini is ready. Google Sheets settings are missing in .env, so results will stay on this page.";
     } else {
       resultOutput.textContent = "No receipt has been analyzed yet.";
     }
@@ -112,12 +140,82 @@ function setMode(mode) {
   cameraPanel.classList.toggle("hidden", isUpload);
 }
 
+function updatePreviewZoom() {
+  imagePreview.style.setProperty("--preview-zoom", previewZoom);
+  zoomValue.textContent = `${Math.round(previewZoom * 100)}%`;
+  zoomOutButton.disabled = previewZoom <= MIN_PREVIEW_ZOOM;
+  zoomInButton.disabled = previewZoom >= MAX_PREVIEW_ZOOM;
+}
+
+function setPreviewZoom(nextZoom) {
+  const previousZoom = previewZoom;
+  previewZoom = Math.min(
+    MAX_PREVIEW_ZOOM,
+    Math.max(MIN_PREVIEW_ZOOM, Number(nextZoom.toFixed(2)))
+  );
+  updatePreviewZoom();
+
+  if (!imagePreviewFrame || previousZoom === previewZoom) {
+    return;
+  }
+
+  const ratio = previewZoom / previousZoom;
+  imagePreviewFrame.scrollLeft = (imagePreviewFrame.scrollLeft + imagePreviewFrame.clientWidth / 2) * ratio - imagePreviewFrame.clientWidth / 2;
+  imagePreviewFrame.scrollTop = (imagePreviewFrame.scrollTop + imagePreviewFrame.clientHeight / 2) * ratio - imagePreviewFrame.clientHeight / 2;
+}
+
+function resetPreviewZoom() {
+  previewZoom = 1;
+  updatePreviewZoom();
+  imagePreviewFrame.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+}
+
+function startPreviewDrag(event) {
+  if (event.button !== 0 || previewZoom <= 1) {
+    return;
+  }
+
+  isDraggingPreview = true;
+  previewDragStartX = event.clientX;
+  previewDragStartY = event.clientY;
+  previewDragStartScrollLeft = imagePreviewFrame.scrollLeft;
+  previewDragStartScrollTop = imagePreviewFrame.scrollTop;
+  imagePreviewFrame.classList.add("dragging");
+  imagePreviewFrame.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function movePreviewDrag(event) {
+  if (!isDraggingPreview) {
+    return;
+  }
+
+  imagePreviewFrame.scrollLeft =
+    previewDragStartScrollLeft - (event.clientX - previewDragStartX);
+  imagePreviewFrame.scrollTop =
+    previewDragStartScrollTop - (event.clientY - previewDragStartY);
+}
+
+function stopPreviewDrag(event) {
+  if (!isDraggingPreview) {
+    return;
+  }
+
+  isDraggingPreview = false;
+  imagePreviewFrame.classList.remove("dragging");
+
+  if (imagePreviewFrame.hasPointerCapture(event.pointerId)) {
+    imagePreviewFrame.releasePointerCapture(event.pointerId);
+  }
+}
+
 function renderPreview(file) {
   currentFile = file;
   analyzedReceipt = null;
   draftReceipt = null;
   previewName.textContent = file.name;
   imagePreview.src = URL.createObjectURL(file);
+  resetPreviewZoom();
   previewPanel.classList.remove("hidden");
   confirmEditButton.classList.add("hidden");
   submitButton.classList.add("hidden");
@@ -211,6 +309,17 @@ function getReceiptTotal(receipt) {
   return Number(total.toFixed(2));
 }
 
+function isDiscountProduct(product) {
+  const name = String(product?.name || "").trim().toLowerCase();
+  const total = Number(product?.total);
+
+  return (
+    /^-+$/.test(name) ||
+    /\b(discount|promo|promotion|coupon|voucher|markdown)\b/.test(name) ||
+    (Number.isFinite(total) && total < 0 && !name)
+  );
+}
+
 function renderEditableReceipt(receipt) {
   draftReceipt = {
     products: (receipt.products || []).map((product) => ({
@@ -271,6 +380,11 @@ function renderEditableReceipt(receipt) {
               <option value="Online Banking" ${product.paymentType === "Online Banking" ? "selected" : ""}>Online Banking</option>
             </select>
           </td>
+          <td>
+            <button class="delete-row-button" data-action="delete-row" type="button" title="Delete row" aria-label="Delete row">
+              Delete
+            </button>
+          </td>
         </tr>
       `
     )
@@ -287,6 +401,7 @@ function renderEditableReceipt(receipt) {
             <th>Status</th>
             <th>Due Date</th>
             <th>Payment_Type</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>${bodyRows}</tbody>
@@ -303,6 +418,21 @@ function renderEditableReceipt(receipt) {
   resultOutput
     .querySelectorAll("select.table-input")
     .forEach((input) => input.addEventListener("change", handleDraftInput));
+  resultOutput
+    .querySelectorAll("[data-action='delete-row']")
+    .forEach((button) => button.addEventListener("click", handleDeleteDraftRow));
+}
+
+function refreshDraftTotal() {
+  draftReceipt.total = getReceiptTotal({
+    ...draftReceipt,
+    total: null,
+  });
+  const totalElement = document.getElementById("editableTotal");
+
+  if (totalElement) {
+    totalElement.textContent = formatPreviewValue(draftReceipt.total);
+  }
 }
 
 function handleDraftInput(event) {
@@ -319,20 +449,29 @@ function handleDraftInput(event) {
       field === "total" ? parseMoney(event.target.value) : event.target.value;
   }
 
-  draftReceipt.total = getReceiptTotal({
-    ...draftReceipt,
-    total: null,
-  });
-  const totalElement = document.getElementById("editableTotal");
-
-  if (totalElement) {
-    totalElement.textContent = formatPreviewValue(draftReceipt.total);
-  }
-
+  refreshDraftTotal();
   analyzedReceipt = null;
   submitButton.classList.add("hidden");
   setEditButtonMode("confirm");
   statusText.textContent = "Confirm edits before submitting";
+}
+
+function handleDeleteDraftRow(event) {
+  if (!draftReceipt) {
+    return;
+  }
+
+  const row = event.target.closest("tr");
+  const index = Number(row?.dataset.rowIndex);
+
+  if (!Number.isInteger(index)) {
+    return;
+  }
+
+  draftReceipt.products.splice(index, 1);
+  draftReceipt.total = null;
+  renderEditableReceipt(draftReceipt);
+  statusText.textContent = "Row deleted. Confirm edits before submitting";
 }
 
 function enterEditMode() {
@@ -365,6 +504,7 @@ function confirmEdits() {
         dueDate: product.status === "Unpaid" ? product.dueDate || null : null,
         paymentType: product.paymentType || null,
       }))
+      .filter((product) => !isDiscountProduct(product))
       .filter((product) => product.name || product.total !== null),
     total: draftReceipt.total,
     status: null,
@@ -392,8 +532,11 @@ function parseMoney(value) {
 
 
 function buildLocalSheetPreview(receipt) {
-  const products = receipt.products.length
-    ? receipt.products
+  const visibleProducts = (receipt.products || []).filter(
+    (product) => !isDiscountProduct(product)
+  );
+  const products = visibleProducts.length
+    ? visibleProducts
     : [{ name: "", qty: "1", total: receipt.total }];
   const total =
     receipt.total ??
@@ -420,17 +563,8 @@ function buildLocalSheetPreview(receipt) {
   };
 }
 
-function renderOcrResult(receipt, sheetPreview) {
+function renderAnalysisResult(sheetPreview) {
   renderSheetPreview(sheetPreview);
-  resultOutput.insertAdjacentHTML(
-    "beforeend",
-    `
-      <details class="ocr-raw">
-        <summary>Raw PaddleOCR text</summary>
-        <pre>${escapeHtml(receipt.rawText || "")}</pre>
-      </details>
-    `
-  );
 }
 
 async function startCamera() {
@@ -498,8 +632,8 @@ async function analyzeReceipt() {
   }
 
   setBusyState(true);
-  statusText.textContent = "Preparing PaddleOCR";
-  resultOutput.textContent = "Reading text from the image...";
+  statusText.textContent = "Preparing Gemini";
+  resultOutput.textContent = "Analyzing the receipt image...";
   submitButton.classList.add("hidden");
   setConfirmVisible(false);
   analyzedReceipt = null;
@@ -509,24 +643,21 @@ async function analyzeReceipt() {
   try {
     const formData = new FormData();
     formData.append("receipt", currentFile);
-    statusText.textContent = "Reading with PaddleOCR";
+    statusText.textContent = "Reading with Gemini";
 
-    const response = await fetch("/api/receipts/ocr", {
+    const response = await fetch("/api/receipts/analyze", {
       method: "POST",
       body: formData,
     });
-    const data = await readJsonResponse(response, "PaddleOCR is not available.");
+    const data = await readJsonResponse(response, "Gemini is not available.");
 
     if (!response.ok) {
-      throw createHttpError(data.error || "PaddleOCR is not available.", response.status);
+      throw createHttpError(data.error || "Gemini is not available.", response.status);
     }
 
     analyzedReceipt = data.receipt;
     statusText.textContent = "Review or edit before submitting";
-    renderOcrResult(
-      { ...data.receipt, rawText: data.rawText || "" },
-      data.sheetPreview || buildLocalSheetPreview(data.receipt)
-    );
+    renderAnalysisResult(data.sheetPreview || buildLocalSheetPreview(data.receipt));
     setEditButtonMode("edit");
     submitButton.classList.toggle("hidden", !healthState.googleSheetsConfigured);
   } catch (error) {
@@ -538,9 +669,9 @@ async function analyzeReceipt() {
       return;
     }
 
-    statusText.textContent = "PaddleOCR failed";
+    statusText.textContent = "Gemini failed";
     resultOutput.innerHTML = `<div class="preview-error">${
-      error instanceof Error ? escapeHtml(error.message) : "PaddleOCR failed."
+      error instanceof Error ? escapeHtml(error.message) : "Gemini failed."
     }</div>`;
   } finally {
     setBusyState(false);
@@ -610,9 +741,21 @@ startCameraButton.addEventListener("click", async () => {
 });
 
 captureButton.addEventListener("click", captureImage);
+zoomOutButton.addEventListener("click", () =>
+  setPreviewZoom(previewZoom - PREVIEW_ZOOM_STEP)
+);
+zoomResetButton.addEventListener("click", resetPreviewZoom);
+zoomInButton.addEventListener("click", () =>
+  setPreviewZoom(previewZoom + PREVIEW_ZOOM_STEP)
+);
+imagePreviewFrame.addEventListener("pointerdown", startPreviewDrag);
+imagePreviewFrame.addEventListener("pointermove", movePreviewDrag);
+imagePreviewFrame.addEventListener("pointerup", stopPreviewDrag);
+imagePreviewFrame.addEventListener("pointercancel", stopPreviewDrag);
 analyzeButton.addEventListener("click", analyzeReceipt);
 confirmEditButton.addEventListener("click", enterEditMode);
 submitButton.addEventListener("click", submitReceipt);
 
 window.addEventListener("beforeunload", stopCamera);
+updatePreviewZoom();
 loadHealthStatus();

@@ -21,7 +21,7 @@ export function renderReceiptPage(user = {}) {
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/assets/styles.css?v=block-parser-2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=discount-edit-1" />
   </head>
   <body class="app-body">
     <main class="app-shell">
@@ -47,20 +47,6 @@ export function renderReceiptPage(user = {}) {
             </button>
           </div>
 
-          <div class="picker-area" id="filePickerPanel">
-            <label class="picker-box" for="receiptFile">
-              <input
-                id="receiptFile"
-                name="receipt"
-                type="file"
-                accept="image/*"
-                hidden
-              />
-              <span>Choose a receipt image</span>
-              <small>Use a phone photo, screenshot, or scanned receipt file.</small>
-            </label>
-          </div>
-
           <div class="camera-area hidden" id="cameraPanel">
             <video id="cameraPreview" playsinline autoplay muted></video>
             <canvas id="captureCanvas" hidden></canvas>
@@ -75,13 +61,40 @@ export function renderReceiptPage(user = {}) {
           </div>
 
           <div class="preview-card hidden" id="previewPanel">
-            <img id="imagePreview" alt="Receipt preview" />
+            <div class="image-preview-toolbar" aria-label="Receipt preview zoom controls">
+              <button class="zoom-control-button" id="zoomOutButton" type="button" title="Zoom out" aria-label="Zoom out">
+                -
+              </button>
+              <button class="zoom-reset-button" id="zoomResetButton" type="button" title="Reset zoom" aria-label="Reset zoom">
+                <span id="zoomValue">100%</span>
+              </button>
+              <button class="zoom-control-button" id="zoomInButton" type="button" title="Zoom in" aria-label="Zoom in">
+                +
+              </button>
+            </div>
+            <div class="image-preview-frame" id="imagePreviewFrame">
+              <img id="imagePreview" alt="Receipt preview" />
+            </div>
             <div class="preview-meta">
               <strong id="previewName">No image selected</strong>
               <button class="primary-button" id="analyzeButton" type="button">
                 Analyze receipt
               </button>
             </div>
+          </div>
+
+          <div class="picker-area" id="filePickerPanel">
+            <label class="picker-box" for="receiptFile">
+              <input
+                id="receiptFile"
+                name="receipt"
+                type="file"
+                accept="image/*"
+                hidden
+              />
+              <span>Choose a receipt image</span>
+              <small>Use a phone photo, screenshot, or scanned receipt file.</small>
+            </label>
           </div>
         </article>
 
@@ -102,7 +115,7 @@ export function renderReceiptPage(user = {}) {
         </article>
       </section>
     </main>
-    <script type="module" src="/assets/upload.js?v=block-parser-2"></script>
+    <script type="module" src="/assets/upload.js?v=discount-edit-1"></script>
   </body>
 </html>`;
 }

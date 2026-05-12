@@ -5,11 +5,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { google } from "googleapis";
 import { z } from "zod";
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { renderAccessPage } from "./views/accessPage.js";
 import { renderReceiptPage } from "./views/receiptPage.js";
@@ -17,7 +13,6 @@ import { renderReceiptPage } from "./views/receiptPage.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
-const execFileAsync = promisify(execFile);
 
 const app = express();
 const RECEIPT_UPLOAD_MAX_MB = Number(process.env.RECEIPT_UPLOAD_MAX_MB || 25);
@@ -27,15 +22,8 @@ const upload = multer({
 });
 
 const PORT = process.env.PORT || 3000;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES || 2);
-const PADDLE_OCR_PYTHON = process.env.PADDLE_OCR_PYTHON || "python";
-const PADDLE_OCR_CACHE_DIR = path.resolve(
-  projectRoot,
-  process.env.PADDLE_OCR_CACHE_DIR || ".paddle-cache"
-);
-const PADDLE_OCR_SCRIPT = path.join(projectRoot, "scripts", "paddle_ocr.py");
-const PADDLE_OCR_TIMEOUT_MS = Number(process.env.PADDLE_OCR_TIMEOUT_MS || 120000);
 const ID_SHEET_NAME = process.env.GOOGLE_SHEETS_ID_WORKSHEET_NAME || "ID";
 const EXPENSE_SHEET_NAME = process.env.GOOGLE_SHEETS_WORKSHEET_NAME || "EXPENSES";
 const APP_TIME_ZONE = process.env.APP_TIME_ZONE || "Asia/Bangkok";
@@ -195,7 +183,7 @@ function getHealthStatus() {
   return {
     ok: true,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
-    paddleOcrEnabled: true,
+    geminiModel: GEMINI_MODEL,
     receiptUploadMaxMb: RECEIPT_UPLOAD_MAX_MB,
     googleSheetsConfigured: Boolean(
       process.env.GOOGLE_SHEETS_SPREADSHEET_ID &&
@@ -577,6 +565,24 @@ function buildSheetPreview(expense) {
     ]),
     total: getExpenseTotal(expense),
   };
+}
+
+function isDiscountProduct(product) {
+  const name = String(product?.name || "").trim().toLowerCase();
+  const total = Number(product?.total);
+
+  return (
+    /^-+$/.test(name) ||
+    /\b(discount|promo|promotion|coupon|voucher|markdown)\b/.test(name) ||
+    (Number.isFinite(total) && total < 0 && !name)
+  );
+}
+
+function removeDiscountProducts(expense) {
+  return expenseSchema.parse({
+    ...expense,
+    products: (expense.products || []).filter((product) => !isDiscountProduct(product)),
+  });
 }
 
 function parseMoney(value) {
@@ -1848,59 +1854,6 @@ function parseOcrExpense(rawText, entries = []) {
   });
 }
 
-async function extractPaddleOcrResult(file) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "receipt-ocr-"));
-  const extension = path.extname(file.originalname || "") || ".jpg";
-  const imagePath = path.join(tempDir, `receipt${extension}`);
-
-  try {
-    await fs.writeFile(imagePath, file.buffer);
-
-    const { stdout } = await execFileAsync(PADDLE_OCR_PYTHON, [
-      PADDLE_OCR_SCRIPT,
-      imagePath,
-    ], {
-      env: {
-        ...process.env,
-        FLAGS_enable_pir_api: process.env.FLAGS_enable_pir_api || "0",
-        HOME: PADDLE_OCR_CACHE_DIR,
-        PADDLE_HOME: PADDLE_OCR_CACHE_DIR,
-        PADDLEOCR_HOME: PADDLE_OCR_CACHE_DIR,
-        USERPROFILE: PADDLE_OCR_CACHE_DIR,
-        XDG_CACHE_HOME: PADDLE_OCR_CACHE_DIR,
-      },
-      timeout: PADDLE_OCR_TIMEOUT_MS,
-      maxBuffer: 10 * 1024 * 1024,
-      windowsHide: true,
-    });
-    const parsed = JSON.parse(stdout);
-
-    if (!parsed.ok) {
-      throw new Error(parsed.error || "PaddleOCR failed.");
-    }
-
-    return {
-      text: normalizeOcrText(parsed.text),
-      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
-    };
-  } catch (error) {
-    if (error?.code === "ENOENT") {
-      throw new Error(
-        `Python command "${PADDLE_OCR_PYTHON}" was not found. Set PADDLE_OCR_PYTHON in .env.`
-      );
-    }
-
-    if (error?.stdout) {
-      const parsed = parseJsonMessage(error.stdout);
-      throw new Error(parsed?.error || error.message);
-    }
-
-    throw error;
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-}
-
 async function appendToSheet(expense) {
   if (!process.env.GOOGLE_SHEETS_SPREADSHEET_ID) {
     return { skipped: true, reason: "Google Sheets is not configured." };
@@ -1950,7 +1903,7 @@ async function extractExpenseData(file) {
             parts: [
               {
                 text:
-                  "Read this receipt or invoice image and extract only these fields: products as separate line items with name and line total, overall total, payment status as Paid or Unpaid, due date only when status is Unpaid in DD/MM/YYYY format, and payment type as Cash, Credit Card, or Online Banking. If status or payment type is not visible, return null. If products repeat, keep each occurrence as a separate product row.",
+                  "Read this receipt or invoice image and extract only these fields: products as separate purchasable line items with name and line total, overall total, payment status as Paid or Unpaid, due date only when status is Unpaid in DD/MM/YYYY format, and payment type as Cash, Credit Card, or Online Banking. Do not include discount, coupon, promotion, voucher, markdown, rounding, tax, subtotal, total, cash, change, or payment rows as products. If a discount applies to an item, keep the product price as printed for the product line and ignore the separate discount line. If status or payment type is not visible, return null. If products repeat, keep each occurrence as a separate product row.",
               },
               {
                 inlineData: {
@@ -1968,7 +1921,7 @@ async function extractExpenseData(file) {
       });
 
       const parsed = JSON.parse(response.text);
-      return expenseSchema.parse(parsed);
+      return removeDiscountProducts(expenseSchema.parse(parsed));
     } catch (error) {
       const shouldRetry =
         attempt < GEMINI_MAX_RETRIES && isRetryableGeminiError(error);
@@ -1979,6 +1932,35 @@ async function extractExpenseData(file) {
 
       await wait(1000 * attempt);
     }
+  }
+}
+
+async function analyzeReceiptImage(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No receipt image uploaded." });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(400).json({
+        error:
+          "GEMINI_API_KEY is missing. Create a .env file in the project root and add your secret key.",
+      });
+    }
+
+    const parsedExpense = await extractExpenseData(req.file);
+
+    return res.json({
+      success: true,
+      engine: "gemini",
+      model: GEMINI_MODEL,
+      message: "Receipt analyzed with Gemini. Review the preview before submitting.",
+      receipt: parsedExpense,
+      sheetPreview: buildSheetPreview(parsedExpense),
+    });
+  } catch (error) {
+    const { httpStatus, message } = getClientError(error);
+    return res.status(httpStatus).json({ error: message });
   }
 }
 
@@ -2018,61 +2000,12 @@ app.get("/api/health", (_req, res) => {
   res.json(getHealthStatus());
 });
 
-app.post("/api/receipts/analyze", requireAuth, uploadReceipt, async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No receipt image uploaded." });
-    }
-
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(400).json({
-        error:
-          "GEMINI_API_KEY is missing. Create a .env file in the project root and add your secret key.",
-      });
-    }
-
-    const parsedExpense = await extractExpenseData(req.file);
-
-    return res.json({
-      success: true,
-      message: "Receipt analyzed. Review the preview before submitting.",
-      receipt: parsedExpense,
-      sheetPreview: buildSheetPreview(parsedExpense),
-    });
-  } catch (error) {
-    const { httpStatus, message } = getClientError(error);
-    return res.status(httpStatus).json({ error: message });
-  }
-});
-
-app.post("/api/receipts/ocr", requireAuth, uploadReceipt, async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No receipt image uploaded." });
-    }
-
-    const ocrResult = await extractPaddleOcrResult(req.file);
-    const parsedExpense = parseOcrExpense(ocrResult.text, ocrResult.entries);
-
-    return res.json({
-      success: true,
-      _debugEntries: ocrResult.entries,
-      engine: "paddleocr",
-      message: "Receipt read with PaddleOCR. Review the preview before submitting.",
-      receipt: parsedExpense,
-      sheetPreview: buildSheetPreview(parsedExpense),
-      rawText: ocrResult.text,
-    });
-  } catch (error) {
-    return res.status(503).json({
-      error: error instanceof Error ? error.message : "PaddleOCR failed.",
-    });
-  }
-});
+app.post("/api/receipts/analyze", requireAuth, uploadReceipt, analyzeReceiptImage);
+app.post("/api/receipts/ocr", requireAuth, uploadReceipt, analyzeReceiptImage);
 
 app.post("/api/receipts/submit", requireAuth, async (req, res) => {
   try {
-    const parsedExpense = expenseSchema.parse(req.body?.receipt);
+    const parsedExpense = removeDiscountProducts(expenseSchema.parse(req.body?.receipt));
     const sheetResult = await appendToSheet(parsedExpense);
 
     return res.json({

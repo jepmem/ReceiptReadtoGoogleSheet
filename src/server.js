@@ -2034,10 +2034,11 @@ app.use((error, req, res, next) => {
   return res.status(httpStatus).json({ error: message });
 });
 
-if (process.env.NODE_ENV !== "test") {
+if (process.env.NODE_ENV !== "test" && !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Receipt app listening on http://localhost:${PORT}`);
   });
 }
 
+export default app;
 export { parseOcrExpense, buildSheetPreview };
